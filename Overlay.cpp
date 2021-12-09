@@ -3,6 +3,8 @@
 #include <Overlay.h>
 #include <make_SSLContext.h>
 
+#include <boost/regex.hpp>
+
 namespace ripple {
 
 Overlay::Overlay(
@@ -30,8 +32,16 @@ Overlay::runPeers()
     {
         if (p != nullptr)
             continue;
-        // TODO make port configurable
-        auto const ep = tcp::endpoint{address::from_string(peerAddr), 51235};
+        std::uint16_t port = 51235;
+        std::string addr = peerAddr;
+        boost::regex rx("^([^:]+):(\\d+)$");
+        boost::smatch match;
+        if (boost::regex_search(peerAddr, match, rx))
+        {
+            addr = match[1];
+            port = std::stoi(match[2]);
+        }
+        auto const ep = tcp::endpoint{address::from_string(addr), port};
         auto peer = std::make_shared<Peer>(
             *this, io_service_, sharedContext_, ep, identity_, messagesToLog_);
         {

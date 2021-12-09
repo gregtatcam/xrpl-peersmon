@@ -69,11 +69,21 @@ Peer::onTimer(error_code ec)
         return;
     if (ec == boost::asio::error::operation_aborted)
         return;
-    if (ec)
-    {
-        // This should never happen
-        return close();
-    }
+    fail("operation timed-out");
+}
+
+void
+Peer::fail(std::string const& message)
+{
+    std::lock_guard l(logMutex_);
+    using namespace std::chrono;
+    auto now =
+        duration_cast<milliseconds>(system_clock::now().time_since_epoch())
+            .count();
+    std::cout << "{" << qstr("tstamp") << ":" << now << ", " << qstr("host")
+              << ":"
+              << "\"" << remoteEndpoint_ << "\""
+              << ", " << qstr("error") << ":" << qstr(message) << "}\n";
     close();
 }
 
@@ -98,7 +108,7 @@ Peer::onConnect(error_code ec)
     if (!ec)
         local_endpoint = socket_.local_endpoint(ec);
     if (ec)
-        return close();
+        return fail(ec.message());
     if (!socket_.is_open())
         return;
 
@@ -166,7 +176,7 @@ Peer::onHandshake(error_code ec)
     if (ec == boost::asio::error::operation_aborted)
         return;
     if (ec)
-        return close();
+        return fail(ec.message());
     req_.method(boost::beast::http::verb::get);
     req_.target("/");
     req_.version(11);
@@ -203,7 +213,7 @@ Peer::onWrite(error_code ec)
     if (ec == boost::asio::error::operation_aborted)
         return;
     if (ec)
-        return close();
+        return fail(ec.message());
     setTimer();
     boost::beast::http::async_read(
         stream_,
@@ -228,7 +238,7 @@ Peer::onRead(error_code ec)
             &Peer::onShutdown, shared_from_this(), std::placeholders::_1)));
     }
     if (ec)
-        return close();
+        return fail(ec.message());
     processResponse();
 }
 
@@ -236,12 +246,6 @@ void
 Peer::onShutdown(error_code ec)
 {
     cancelTimer();
-    if (!ec)
-    {
-        return close();
-    }
-    // if (ec != boost::asio::error::eof)
-    //    return close();
     close();
 }
 
@@ -262,18 +266,18 @@ Peer::processResponse()
 {
     // 503
     if (response_.result() == boost::beast::http::status::service_unavailable)
-        return close();
+        return fail("service unavailable");
 
     // not the upgrade
     if (response_.version() < 11)
-        return close();
+        return fail("not upgrade");
     if (!boost::beast::http::token_list{response_["Connection"]}.exists(
             "upgrade"))
-        return close();
+        return fail("not upgrade");
 
     auto const sharedValue = makeSharedValue(*streamPtr_);
     if (!sharedValue)
-        return close();  // makeSharedValue logs
+        return fail("failed shared value");  // makeSharedValue logs
 
     try
     {
@@ -313,7 +317,7 @@ Peer::processResponse()
     }
     catch (std::exception const& e)
     {
-        return close();
+        return fail(e.what());
     }
     onReadMessage(error_code(), 0);
 }
@@ -330,7 +334,7 @@ Peer::onReadMessage(error_code ec, std::size_t bytes_transferred)
         return gracefulClose();
     }
     if (ec)
-        return close();
+        return fail(ec.message());
 
     read_buf_.commit(bytes_transferred);
 
@@ -344,7 +348,7 @@ Peer::onReadMessage(error_code ec, std::size_t bytes_transferred)
         std::tie(bytes_consumed, ec) =
             invokeProtocolMessage(read_buf_.data(), *this, hint);
         if (ec)
-            return close();
+            return fail(ec.message());
         if (!socket_.is_open())
             return;
         if (gracefulClose_)
@@ -357,13 +361,11 @@ Peer::onReadMessage(error_code ec, std::size_t bytes_transferred)
     // Timeout on writes only
     stream_.async_read_some(
         read_buf_.prepare(std::max(readBufferBytes, hint)),
-        bind_executor(
-            strand_,
-            std::bind(
-                &Peer::onReadMessage,
-                shared_from_this(),
-                std::placeholders::_1,
-                std::placeholders::_2)));
+        std::bind(
+            &Peer::onReadMessage,
+            shared_from_this(),
+            std::placeholders::_1,
+            std::placeholders::_2));
 }
 
 void
@@ -383,15 +385,14 @@ Peer::send(std::shared_ptr<Message> const& m)
     boost::asio::async_write(
         stream_,
         boost::asio::buffer(m->getBuffer(compression::Compressed::Off)),
-        bind_executor(
-            strand_, [shared, m](error_code ec, std::size_t bytes_transferred) {
-                if (!shared->socket_.is_open())
-                    return;
-                if (ec == boost::asio::error::operation_aborted)
-                    return;
-                if (ec)
-                    shared->close();
-            }));
+        [shared, m](error_code ec, std::size_t bytes_transferred) {
+            if (!shared->socket_.is_open())
+                return;
+            if (ec == boost::asio::error::operation_aborted)
+                return;
+            if (ec)
+                shared->fail(ec.message());
+        });
 }
 
 void
@@ -401,10 +402,10 @@ Peer::onMessageBegin(const MessageHeader& h)
     auto now =
         duration_cast<milliseconds>(system_clock::now().time_since_epoch())
             .count();
-    std::cout << "{" << qstr("type") << ":" << h.message_type << ", "
-              << qstr("msgsize") << ":" << h.total_wire_size << ", "
-              << qstr("tstamp") << ":" << now << ", " << qstr("host") << ":"
-              << qstr(remoteEndpoint_.address().to_string());
+    std::cout << "{" << qstr("tstamp") << ":" << now << ", " << qstr("host")
+              << ":" << qstr(remoteEndpoint_.address().to_string()) << ", "
+              << qstr("type") << ":" << h.message_type << ", "
+              << qstr("msgsize") << ":" << h.total_wire_size;
 }
 
 void

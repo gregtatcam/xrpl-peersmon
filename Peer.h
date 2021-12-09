@@ -180,6 +180,8 @@ private:
         std::cout << ", " << arg1 << ":" << arg2;
         dumpJson(args...);
     }
+    void
+    fail(std::string const& message);
 };
 
 }  // namespace ripple
