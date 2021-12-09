@@ -52,7 +52,7 @@ private:
     identity_type const& identity_;
     boost::asio::basic_waitable_timer<std::chrono::steady_clock> timer_;
     bool gracefulClose_ = false;
-    static inline std::mutex logMutex_;
+    static inline std::recursive_mutex logMutex_;
     std::unordered_map<int, bool> const& shouldLog_;
 
 public:
@@ -69,56 +69,66 @@ public:
     void
     run();
 
+    bool
+    shouldLog(int type) const
+    {
+        return shouldLog_.find(type) != shouldLog_.end();
+    }
+
     void
-    onMessage(MessageHeader const&, protocol::TMManifests& m);
+    onMessageBegin(MessageHeader const&);
     void
-    onMessage(MessageHeader const&, protocol::TMPing& m);
+    onMessageEnd();
     void
-    onMessage(MessageHeader const&, protocol::TMCluster& m);
+    onMessage(protocol::TMManifests& m);
     void
-    onMessage(MessageHeader const&, protocol::TMEndpoints& m);
+    onMessage(protocol::TMPing& m);
     void
-    onMessage(MessageHeader const&, protocol::TMTransaction& m);
+    onMessage(protocol::TMCluster& m);
     void
-    onMessage(MessageHeader const&, protocol::TMGetLedger& m);
+    onMessage(protocol::TMEndpoints& m);
     void
-    onMessage(MessageHeader const&, protocol::TMLedgerData& m);
+    onMessage(protocol::TMTransaction& m);
     void
-    onMessage(MessageHeader const&, protocol::TMProposeSet& m);
+    onMessage(protocol::TMGetLedger& m);
     void
-    onMessage(MessageHeader const&, protocol::TMStatusChange& m);
+    onMessage(protocol::TMLedgerData& m);
     void
-    onMessage(MessageHeader const&, protocol::TMHaveTransactionSet& m);
+    onMessage(protocol::TMProposeSet& m);
     void
-    onMessage(MessageHeader const&, protocol::TMValidation& m);
+    onMessage(protocol::TMStatusChange& m);
     void
-    onMessage(MessageHeader const&, protocol::TMGetPeerShardInfo& m);
+    onMessage(protocol::TMHaveTransactionSet& m);
     void
-    onMessage(MessageHeader const&, protocol::TMPeerShardInfo& m);
+    onMessage(protocol::TMValidation& m);
     void
-    onMessage(MessageHeader const&, protocol::TMValidatorList& m);
+    onMessage(protocol::TMGetPeerShardInfo& m);
     void
-    onMessage(MessageHeader const&, protocol::TMValidatorListCollection& m);
+    onMessage(protocol::TMPeerShardInfo& m);
     void
-    onMessage(MessageHeader const&, protocol::TMGetObjectByHash& m);
+    onMessage(protocol::TMValidatorList& m);
     void
-    onMessage(MessageHeader const&, protocol::TMHaveTransactions& m);
+    onMessage(protocol::TMValidatorListCollection& m);
     void
-    onMessage(MessageHeader const&, protocol::TMTransactions& m);
+    onMessage(protocol::TMGetObjectByHash& m);
     void
-    onMessage(MessageHeader const&, protocol::TMSquelch& m);
+    onMessage(protocol::TMHaveTransactions& m);
     void
-    onMessage(MessageHeader const&, protocol::TMProofPathRequest& m);
+    onMessage(protocol::TMTransactions& m);
     void
-    onMessage(MessageHeader const&, protocol::TMProofPathResponse& m);
+    onMessage(protocol::TMSquelch& m);
     void
-    onMessage(MessageHeader const&, protocol::TMReplayDeltaRequest& m);
+    onMessage(protocol::TMProofPathRequest& m);
     void
-    onMessage(MessageHeader const&, protocol::TMReplayDeltaResponse& m);
+    onMessage(protocol::TMProofPathResponse& m);
     void
-    onMessage(MessageHeader const&, protocol::TMGetPeerShardInfoV2& m);
+    onMessage(protocol::TMReplayDeltaRequest& m);
     void
-    onMessage(MessageHeader const&, protocol::TMPeerShardInfoV2& m);
+    onMessage(protocol::TMReplayDeltaResponse& m);
+    void
+    onMessage(protocol::TMGetPeerShardInfoV2& m);
+    void
+    onMessage(protocol::TMPeerShardInfoV2& m);
 
 private:
     void
@@ -155,34 +165,20 @@ private:
         str << "\"" << v << "\"";
         return str.str();
     }
+    template <typename Arg1, typename Arg2>
     void
-    dumpJson();
-    template <typename Arg2, typename... Args>
-    void
-    dumpJson(
-        MessageHeader const& h,
-        std::string const& arg1,
-        Arg2&& arg2,
-        Args&&... args)
+    dumpJson(Arg1&& arg1, Arg2&& arg2)
     {
         std::lock_guard l(logMutex_);
-        dumpJson(h);
+        std::cout << ", " << arg1 << ":" << arg2;
+    }
+    template <typename Arg1, typename Arg2, typename... Args>
+    void
+    dumpJson(Arg1&& arg1, Arg2&& arg2, Args&&... args)
+    {
+        std::lock_guard l(logMutex_);
         std::cout << ", " << arg1 << ":" << arg2;
         dumpJson(args...);
-    }
-    void
-    dumpJson(MessageHeader const& h);
-    template <typename Arg2, typename... Args>
-    void
-    dumpJson(std::string const& arg1, Arg2&& arg2, Args&&... args)
-    {
-        std::cout << ", " << arg1 << ":" << arg2;
-        dumpJson(args...);
-    }
-    bool
-    shouldLog(int type)
-    {
-        return shouldLog_.find(type) != shouldLog_.end();
     }
 };
 

@@ -395,13 +395,7 @@ Peer::send(std::shared_ptr<Message> const& m)
 }
 
 void
-Peer::dumpJson()
-{
-    std::cout << "}" << std::endl;
-}
-
-void
-Peer::dumpJson(MessageHeader const& h)
+Peer::onMessageBegin(const MessageHeader& h)
 {
     using namespace std::chrono;
     auto now =
@@ -414,22 +408,27 @@ Peer::dumpJson(MessageHeader const& h)
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMManifests& m)
+Peer::onMessageEnd()
 {
-    overlay_.onManifests(m);
-    std::lock_guard l(logMutex_);
-    if (shouldLog(header.message_type))
-        dumpJson(header, "size", m.list_size());
+    std::cout << "}" << std::endl;
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMPing& m)
+Peer::onMessage(protocol::TMManifests& m)
+{
+    overlay_.onManifests(m);
+    std::lock_guard l(logMutex_);
+    if (shouldLog(protocol::mtMANIFESTS))
+        dumpJson("size", m.list_size());
+}
+
+void
+Peer::onMessage(protocol::TMPing& m)
 {
     m.set_type(protocol::TMPing::ptPONG);
     send(std::make_shared<Message>(m, protocol::mtPING));
-    if (shouldLog(header.message_type))
+    if (shouldLog(protocol::mtPING))
         dumpJson(
-            header,
             qstr("seq"),
             m.seq(),
             qstr("pingtime"),
@@ -439,56 +438,47 @@ Peer::onMessage(MessageHeader const& header, protocol::TMPing& m)
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMCluster& m)
+Peer::onMessage(protocol::TMCluster& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(
-            header,
-            qstr("sizenodes"),
-            m.clusternodes_size(),
-            qstr("sizesources"),
-            m.loadsources_size());
+    dumpJson(
+        qstr("sizenodes"),
+        m.clusternodes_size(),
+        qstr("sizesources"),
+        m.loadsources_size());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMEndpoints& m)
+Peer::onMessage(protocol::TMEndpoints& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(header, qstr("size"), m.endpoints_v2_size());
+    dumpJson(qstr("size"), m.endpoints_v2_size());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMTransaction& m)
+Peer::onMessage(protocol::TMTransaction& m)
 {
-    if (shouldLog(header.message_type))
-    {
-        const std::string& st = m.rawtransaction();
-        ripple::SerialIter sit(ripple::makeSlice(st));
-        ripple::STTx stx(sit);
-        ripple::uint256 txID = stx.getTransactionID();
-        dumpJson(header, qstr("txhash"), qstr(txID));
-    }
+    const std::string& st = m.rawtransaction();
+    ripple::SerialIter sit(ripple::makeSlice(st));
+    ripple::STTx stx(sit);
+    ripple::uint256 txID = stx.getTransactionID();
+    dumpJson(qstr("txhash"), qstr(txID));
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMGetLedger& m)
+Peer::onMessage(protocol::TMGetLedger& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(header, qstr("itype"), m.itype());
+    dumpJson(qstr("itype"), m.itype());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMLedgerData& m)
+Peer::onMessage(protocol::TMLedgerData& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(
-            header,
-            qstr("hash"),
-            ripple::uint256{m.ledgerhash()},
-            qstr("seq"),
-            m.ledgerseq(),
-            qstr("itype"),
-            m.type());
+    dumpJson(
+        qstr("hash"),
+        ripple::uint256{m.ledgerhash()},
+        qstr("seq"),
+        m.ledgerseq(),
+        qstr("itype"),
+        m.type());
 }
 
 ripple::uint256
@@ -512,215 +502,170 @@ proposalUniqueId(
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMProposeSet& m)
+Peer::onMessage(protocol::TMProposeSet& m)
 {
-    if (shouldLog(header.message_type))
-    {
-        ripple::uint256 const proposeHash{m.currenttxhash()};
-        ripple::uint256 const prevLedger{m.previousledger()};
-        ripple::PublicKey const publicKey{ripple::makeSlice(m.nodepubkey())};
-        ripple::NetClock::time_point const closeTime{
-            ripple::NetClock::duration{m.closetime()}};
-        auto const sig = ripple::makeSlice(m.signature());
+    ripple::uint256 const proposeHash{m.currenttxhash()};
+    ripple::uint256 const prevLedger{m.previousledger()};
+    ripple::PublicKey const publicKey{ripple::makeSlice(m.nodepubkey())};
+    ripple::NetClock::time_point const closeTime{
+        ripple::NetClock::duration{m.closetime()}};
+    auto const sig = ripple::makeSlice(m.signature());
 
-        auto const propID = proposalUniqueId(
-            proposeHash,
-            prevLedger,
-            m.proposeseq(),
-            closeTime,
-            publicKey.slice(),
-            sig);
-        dumpJson(
-            header,
-            qstr("validator"),
-            qstr(ripple::makeSlice(m.nodepubkey())),
-            qstr("prophash"),
-            qstr(propID));
-    }
+    auto const propID = proposalUniqueId(
+        proposeHash,
+        prevLedger,
+        m.proposeseq(),
+        closeTime,
+        publicKey.slice(),
+        sig);
+    dumpJson(
+        qstr("validator"),
+        qstr(ripple::makeSlice(m.nodepubkey())),
+        qstr("prophash"),
+        qstr(propID));
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMStatusChange& m)
+Peer::onMessage(protocol::TMStatusChange& m)
 {
-    if (shouldLog(header.message_type))
-    {
-        if (m.has_newstatus())
-            dumpJson(header, qstr("newstatus"), m.newstatus());
-        else
-            dumpJson(header, qstr("newstatus"), m.newstatus());
-    }
+    if (m.has_newstatus())
+        dumpJson(qstr("newstatus"), m.newstatus());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMHaveTransactionSet& m)
+Peer::onMessage(protocol::TMHaveTransactionSet& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(
-            header,
-            qstr("status"),
-            m.status(),
-            qstr("hash"),
-            ripple::uint256(m.hash()));
+    dumpJson(
+        qstr("status"), m.status(), qstr("hash"), ripple::uint256(m.hash()));
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMValidation& m)
+Peer::onMessage(protocol::TMValidation& m)
 {
-    if (shouldLog(header.message_type))
-    {
-        auto valID = ripple::sha512Half(ripple::makeSlice(m.validation()));
-        ripple::SerialIter sit(ripple::makeSlice(m.validation()));
-        ripple::STValidation stval(
-            std::ref(sit),
-            [&](ripple::PublicKey const& pk) {
-                if (auto master = overlay_.haveSigning(pk); master)
-                    return ripple::calcNodeID(*master);
-                dumpJson(
-                    header,
-                    qstr("error"),
-                    qstr("manifest sigpk to master not found"),
-                    qstr("key"),
-                    qstr(ripple::Slice(pk)));
-                return ripple::NodeID{1};
-            },
-            false);
-        dumpJson(
-            header,
-            qstr("validator"),
-            qstr(ripple::Slice(stval.getSignerPublic())),
-            qstr("valhash"),
-            qstr(valID));
-    }
+    auto valID = ripple::sha512Half(ripple::makeSlice(m.validation()));
+    ripple::SerialIter sit(ripple::makeSlice(m.validation()));
+    ripple::STValidation stval(
+        std::ref(sit),
+        [&](ripple::PublicKey const& pk) {
+            if (auto master = overlay_.haveSigning(pk); master)
+                return ripple::calcNodeID(*master);
+            dumpJson(
+                qstr("error"),
+                qstr("manifest sigpk to master not found"),
+                qstr("key"),
+                qstr(ripple::Slice(pk)));
+            return ripple::NodeID{1};
+        },
+        false);
+    dumpJson(
+        qstr("validator"),
+        qstr(ripple::Slice(stval.getSignerPublic())),
+        qstr("valhash"),
+        qstr(valID));
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMGetPeerShardInfo& m)
+Peer::onMessage(protocol::TMGetPeerShardInfo& m)
 {
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMPeerShardInfo& m)
+Peer::onMessage(protocol::TMPeerShardInfo& m)
 {
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMValidatorList& m)
+Peer::onMessage(protocol::TMValidatorList& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(header, qstr("version"), m.version());
+    dumpJson(qstr("version"), m.version());
 }
 
 void
-Peer::onMessage(
-    MessageHeader const& header,
-    protocol::TMValidatorListCollection& m)
+Peer::onMessage(protocol::TMValidatorListCollection& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(header, qstr("version"), m.version());
+    dumpJson(qstr("version"), m.version());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMGetObjectByHash& m)
+Peer::onMessage(protocol::TMGetObjectByHash& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(
-            header,
-            qstr("type"),
-            m.type(),
-            qstr("query"),
-            m.query(),
-            qstr("size"),
-            m.objects_size());
+    dumpJson(
+        qstr("type"),
+        m.type(),
+        qstr("query"),
+        m.query(),
+        qstr("size"),
+        m.objects_size());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMHaveTransactions& m)
+Peer::onMessage(protocol::TMHaveTransactions& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(header, qstr("size_hashes"), m.hashes_size());
+    dumpJson(qstr("size_hashes"), m.hashes_size());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMTransactions& m)
+Peer::onMessage(protocol::TMTransactions& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(header, qstr("size_transactions"), m.transactions_size());
+    dumpJson(qstr("size_transactions"), m.transactions_size());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMSquelch& m)
+Peer::onMessage(protocol::TMSquelch& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(
-            header,
-            qstr("squelch"),
-            m.squelch(),
-            qstr("valhash"),
-            ripple::uint256{m.validatorpubkey()});
+    dumpJson(
+        qstr("squelch"),
+        m.squelch(),
+        qstr("valhash"),
+        ripple::uint256{m.validatorpubkey()});
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMProofPathRequest& m)
+Peer::onMessage(protocol::TMProofPathRequest& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(
-            header,
-            qstr("key"),
-            ripple::uint256{m.key()},
-            qstr("ledger_hash"),
-            ripple::uint256{m.ledgerhash()});
+    dumpJson(
+        qstr("key"),
+        ripple::uint256{m.key()},
+        qstr("ledger_hash"),
+        ripple::uint256{m.ledgerhash()});
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMProofPathResponse& m)
+Peer::onMessage(protocol::TMProofPathResponse& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(
-            header,
-            qstr("key"),
-            ripple::uint256{m.key()},
-            qstr("ledger_hash"),
-            ripple::uint256{m.ledgerhash()},
-            qstr("type"),
-            m.type());
+    dumpJson(
+        qstr("key"),
+        ripple::uint256{m.key()},
+        qstr("ledger_hash"),
+        ripple::uint256{m.ledgerhash()},
+        qstr("type"),
+        m.type());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMReplayDeltaRequest& m)
+Peer::onMessage(protocol::TMReplayDeltaRequest& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(header, qstr("ledger_hash"), ripple::uint256{m.ledgerhash()});
+    dumpJson(qstr("ledger_hash"), ripple::uint256{m.ledgerhash()});
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMReplayDeltaResponse& m)
+Peer::onMessage(protocol::TMReplayDeltaResponse& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(header, qstr("ledger_hash"), ripple::uint256{m.ledgerhash()});
+    dumpJson(qstr("ledger_hash"), ripple::uint256{m.ledgerhash()});
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMGetPeerShardInfoV2& m)
+Peer::onMessage(protocol::TMGetPeerShardInfoV2& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(
-            header,
-            qstr("peerchain_size"),
-            m.peerchain_size(),
-            qstr("relays"),
-            m.relays());
+    dumpJson(
+        qstr("peerchain_size"), m.peerchain_size(), qstr("relays"), m.relays());
 }
 
 void
-Peer::onMessage(MessageHeader const& header, protocol::TMPeerShardInfoV2& m)
+Peer::onMessage(protocol::TMPeerShardInfoV2& m)
 {
-    if (shouldLog(header.message_type))
-        dumpJson(
-            header,
-            qstr("timestamp"),
-            m.timestamp(),
-            qstr("publickey"),
-            m.publickey());
+    dumpJson(
+        qstr("timestamp"), m.timestamp(), qstr("publickey"), m.publickey());
 }
 
 }  // namespace ripple

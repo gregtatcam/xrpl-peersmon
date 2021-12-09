@@ -224,11 +224,20 @@ template <
 bool
 invoke(MessageHeader const& header, Buffers const& buffers, Handler& handler)
 {
+    // don't parse/handle if don't need to log unless it's ping or manifest
+    // which have to be processed but might not be logged
+    if (!handler.shouldLog(header.message_type) &&
+        header.message_type != protocol::mtPING &&
+        header.message_type != protocol::mtMANIFESTS)
+        return true;
     auto m = parseMessageContent<T>(header, buffers);
     if (!m)
         return false;
-
-    handler.onMessage(header, *m);
+    if (handler.shouldLog(header.message_type))
+        handler.onMessageBegin(header);
+    handler.onMessage(*m);
+    if (handler.shouldLog(header.message_type))
+        handler.onMessageEnd();
 
     return true;
 }
