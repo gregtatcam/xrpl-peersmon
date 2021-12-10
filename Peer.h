@@ -53,7 +53,7 @@ private:
     boost::asio::basic_waitable_timer<std::chrono::steady_clock> timer_;
     bool gracefulClose_ = false;
     static inline std::recursive_mutex logMutex_;
-    std::unordered_map<int, bool> const& shouldLog_;
+    std::atomic_bool writeInProgress_{false};
 
 public:
     Peer(
@@ -61,8 +61,7 @@ public:
         boost::asio::io_service& io_service,
         shared_context const& context,
         endpoint_type const& endpoint,
-        identity_type const& identity,
-        std::unordered_map<int, bool> const& shouldLog);
+        identity_type const& identity);
 
     ~Peer();
 
@@ -70,10 +69,7 @@ public:
     run();
 
     bool
-    shouldLog(int type) const
-    {
-        return shouldLog_.find(type) != shouldLog_.end();
-    }
+    shouldLog(int type) const;
 
     void
     onMessageBegin(MessageHeader const&);

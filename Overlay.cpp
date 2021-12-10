@@ -43,7 +43,7 @@ Overlay::runPeers()
         }
         auto const ep = tcp::endpoint{address::from_string(addr), port};
         auto peer = std::make_shared<Peer>(
-            *this, io_service_, sharedContext_, ep, identity_, messagesToLog_);
+            *this, io_service_, sharedContext_, ep, identity_);
         {
             peers_.emplace(peerAddr, peer);
         }

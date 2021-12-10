@@ -20,8 +20,7 @@ Peer::Peer(
     boost::asio::io_service& io_service,
     shared_context const& context,
     endpoint_type const& endpoint,
-    identity_type const& identity,
-    std::unordered_map<int, bool> const& shouldLog)
+    identity_type const& identity)
     : overlay_(overlay)
     , strand_{io_service}
     , streamPtr_(std::make_unique<stream_type>(
@@ -32,7 +31,6 @@ Peer::Peer(
     , remoteEndpoint_(endpoint)
     , identity_(identity)
     , timer_(io_service)
-    , shouldLog_(shouldLog)
 {
 }
 
@@ -70,6 +68,12 @@ Peer::onTimer(error_code ec)
     if (ec == boost::asio::error::operation_aborted)
         return;
     fail("operation timed-out");
+}
+
+bool
+Peer::shouldLog(int type) const
+{
+    return overlay_.shouldLog(type);
 }
 
 void
@@ -358,14 +362,21 @@ Peer::onReadMessage(error_code ec, std::size_t bytes_transferred)
         read_buf_.consume(bytes_consumed);
     }
 
-    // Timeout on writes only
-    stream_.async_read_some(
-        read_buf_.prepare(std::max(readBufferBytes, hint)),
-        std::bind(
-            &Peer::onReadMessage,
-            shared_from_this(),
-            std::placeholders::_1,
-            std::placeholders::_2));
+    auto doRead = [&](auto&& bind) {
+        if (writeInProgress_)
+            stream_.async_read_some(
+                read_buf_.prepare(std::max(readBufferBytes, hint)),
+                bind_executor(strand_, bind));
+        else
+            stream_.async_read_some(
+                read_buf_.prepare(std::max(readBufferBytes, hint)), bind);
+    };
+
+    doRead(std::bind(
+        &Peer::onReadMessage,
+        shared_from_this(),
+        std::placeholders::_1,
+        std::placeholders::_2));
 }
 
 void
@@ -381,18 +392,21 @@ Peer::gracefulClose()
 void
 Peer::send(std::shared_ptr<Message> const& m)
 {
+    writeInProgress_ = true;
     auto shared = shared_from_this();
     boost::asio::async_write(
         stream_,
         boost::asio::buffer(m->getBuffer(compression::Compressed::Off)),
-        [shared, m](error_code ec, std::size_t bytes_transferred) {
-            if (!shared->socket_.is_open())
-                return;
-            if (ec == boost::asio::error::operation_aborted)
-                return;
-            if (ec)
-                shared->fail(ec.message());
-        });
+        bind_executor(
+            strand_, [&, shared](error_code ec, std::size_t bytes_transferred) {
+                if (!socket_.is_open())
+                    return;
+                if (ec == boost::asio::error::operation_aborted)
+                    return;
+                if (ec)
+                    return fail(ec.message());
+                writeInProgress_ = false;
+            }));
 }
 
 void

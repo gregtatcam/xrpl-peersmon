@@ -53,9 +53,10 @@ public:
         return std::nullopt;
     }
     bool
-    shouldLog(int type)
+    shouldLog(int type) const
     {
-        return messagesToLog_.find(type) != messagesToLog_.end();
+        return messagesToLog_.empty() ||
+            messagesToLog_.find(type) != messagesToLog_.end();
     }
 
 private:

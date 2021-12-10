@@ -68,9 +68,9 @@ main(int argc, char* argv[])
             }
         }
     }
-    if (peers.empty() || messagesToLog.empty())
+    if (peers.empty())
     {
-        std::cerr << "peers and messages options must be specified\n";
+        std::cerr << "peers option must be specified\n";
         return 1;
     }
     threads.reserve(numberOfThreads);
